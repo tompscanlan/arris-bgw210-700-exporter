@@ -2,24 +2,35 @@ package main
 
 import (
 	"flag"
-	"fmt"
+	"log"
+	"math"
+	"net/http"
+	"strconv"
+	"time"
+
 	"github.com/PuerkitoBio/goquery"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"log"
-	"net/http"
-	"time"
 )
 
 func recordMetrics() {
+
 	go func() {
+		ipv4Stats := make(map[string]int)
+		ipv6Stats := make(map[string]int)
+
 		for {
-			response, err := http.Get("http://192.168.1.254/cgi-bin/broadbandstatistics.haX")
+			ipv4StatsCurrent := make(map[string]int)
+			ipv6StatsCurrent := make(map[string]int)
+
+			response, err := http.Get("http://192.168.1.254/cgi-bin/broadbandstatistics.ha")
 			if err != nil {
 				probeSuccessGauge.Set(0)
 				log.Printf("request failed: %s\n", err)
-				response.Body.Close()
+				if response != nil {
+					response.Body.Close()
+				}
 				continue
 			} else {
 				probeSuccessGauge.Set(1)
@@ -35,38 +46,62 @@ func recordMetrics() {
 			// Load the HTML document
 			doc, err := goquery.NewDocumentFromReader(response.Body)
 			if err != nil {
-				log.Printf("failed to query doc: %s\n",err)
+				log.Printf("failed to query doc: %s\n", err)
 				response.Body.Close()
 				continue
 			}
-			fmt.Println("ipv4")
-			// Find the review items
+
+			// fmt.Println("ipv4")
+			// Grab the ipv4 stats section
 			doc.Find("#content-sub table[summary=\"Ethernet IPv4 Statistics Table\"]").Each(func(i int, s *goquery.Selection) {
+				key := s.Find("th").Text()
+				log.Printf("found ipv4 key %s\n", key)
+				counter, err := strconv.Atoi(s.Find("tr").Text())
 
-				// For each item found, get the title
-				label := s.Find("th").Text()
-				value := s.Find("tr").Text()
-				fmt.Printf("found %d: %s = %s\n", i, label, value)
+				if err != nil {
+					log.Printf("err for %s value: %s", key, err)
+				} else {
+					ipv4Stats[key] = counter
+				}
 			})
 
-			fmt.Println("ipv6")
+			// fmt.Println("ipv6")
+			// Grab the ipv6 stats section
 			doc.Find("#content-sub table[summary=\"IPv6 Statistics Table\"]").Each(func(i int, s *goquery.Selection) {
+				key := s.Find("th").Text()
+				log.Printf("found ipv6 key %s\n", key)
+				counter, err := strconv.Atoi(s.Find("tr").Text())
 
-				// For each item found, get the title
-				label := s.Find("th").Text()
-				value := s.Find("tr").Text()
-				fmt.Printf("found %d: %s = %s\n", i, label, value)
+				if err != nil {
+					log.Printf("err for %s value: %s", key, err)
+				} else {
+					ipv6Stats[key] = counter
+				}
 			})
+
+			for k, v := range ipv4Stats {
+				if stat, ok := ipv4StatsCurrent[k]; ok {
+
+					if stat > v {
+						//  if the stat counter has wrapped around
+						attBroadbandIpv4RxPackets.Add(float64((math.MaxInt64 - v) + stat))
+					} else {
+						// otherwise, difference between last and current values
+						attBroadbandIpv4RxPackets.Add(float64(v - stat))
+					}
+				}
+			}
 
 			time.Sleep(2 * time.Second)
+
 		}
 	}()
 }
 
 var (
-	addr                      = flag.String("listen-address", ":9085", "The address to listen on for HTTP requests.")
-	deviceName                = "Arris BGW210-700"
-	metricsPath               = "/metrics"
+	addr              = flag.String("listen-address", ":9085", "The address to listen on for HTTP requests.")
+	deviceName        = "Arris BGW210-700"
+	metricsPath       = "/metrics"
 	probeSuccessGauge = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "probe_success",
 		Help: "Displays whether or not the probe was a success",
@@ -82,9 +117,44 @@ var (
 	})
 )
 
+// Receive Packets 	91399113
+// Transmit Packets 	51871120
+// Receive Bytes 	118049999769
+// Transmit Bytes 	41305517047
+// Receive Unicast 	91399112
+// Transmit Unicast 	51869821
+// Receive Multicast 	-2
+// Transmit Multicast 	485
+// Receive Drops 	-3
+// Transmit Drops 	6015
+// Receive Errors 	-3
+// Transmit Errors 	-3
+// Collisions 	-3
+
+// IPv3 Statistics
+// Transmit Packets 	806025
+// Transmit Errors 	-3
+// Transmit Discards 	8930
+
+type InterfaceMetric int
+
+const (
+	RxPackets InterfaceMetric = iota
+	TxPackets
+	RxBytes
+	TxBytes
+	RxUnicast
+	TxUnicast
+	RxMulticast
+	TxMulticast
+	RxDrops
+	TxDrops
+	RxErrors
+	TxErrors
+)
+
 func main() {
 	flag.Parse()
-
 
 	//prometheus.MustRegister(probeSuccessGauge)
 	//prometheus.MustRegister(probeStatusCodeGauge)
