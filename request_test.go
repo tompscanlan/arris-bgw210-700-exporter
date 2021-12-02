@@ -17,6 +17,22 @@ func (m *MockClient) Get(url string) (*http.Response, error) {
 	return m.MockGet(url)
 }
 
+func TestGrabDocFailed(t *testing.T) {
+	Client = &MockClient{
+		MockGet: func(url string) (resp *http.Response, err error) {
+			return &http.Response{
+				StatusCode: 0,
+				Body:       ioutil.NopCloser(strings.NewReader("")),
+			}, fmt.Errorf("error!")
+		},
+	}
+	_, err := grabDocument("http://example.com")
+
+	if err == nil {
+		t.Errorf("Expected non nil error")
+	}
+}
+
 func TestGrabDocGoodStatus(t *testing.T) {
 	Client = &MockClient{
 		MockGet: func(url string) (resp *http.Response, err error) {
@@ -29,9 +45,10 @@ func TestGrabDocGoodStatus(t *testing.T) {
 	_, err := grabDocument("http://example.com")
 
 	if err != nil {
-		t.Errorf("Expected non nil error")
+		t.Errorf("Expected nil error")
 	}
 }
+
 func TestGrabDocBadStatus(t *testing.T) {
 	Client = &MockClient{
 		MockGet: func(url string) (resp *http.Response, err error) {

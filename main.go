@@ -3,9 +3,9 @@ package main
 import (
 	"flag"
 	"log"
-	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -14,15 +14,33 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+func getIntMetricsMapFromDocumentSection(doc *goquery.Document, selector string) map[string]int64 {
+
+	metrics := make(map[string]int64)
+
+	doc.Find(selector).Each(func(_ int, s *goquery.Selection) {
+		key := s.Find("th").Text()
+		key = strings.ToLower(key)
+		key = strings.ReplaceAll(key, " ", "_")
+		counter, err := strconv.Atoi(s.Find("tr").Text())
+
+		if key != "" && err == nil {
+			metrics[key] = int64(counter)
+		} else {
+			log.Printf("%s = %d or %s", key, counter, err)
+		}
+	})
+
+	return metrics
+}
+
 func recordMetrics() {
 
 	go func() {
-		ipv4Stats := make(map[string]int)
-		ipv6Stats := make(map[string]int)
+		ipv4Stats := make(map[string]int64)
+		ipv6Stats := make(map[string]int64)
 
 		for {
-			ipv4StatsCurrent := make(map[string]int)
-			// ipv6StatsCurrent := make(map[string]int)
 
 			doc, err := grabDocument("http://192.168.1.254/cgi-bin/broadbandstatistics.ha")
 			if err != nil {
@@ -30,44 +48,18 @@ func recordMetrics() {
 				continue
 			}
 
-			// fmt.Println("ipv4")
-			// Grab the ipv4 stats section
-			doc.Find("#content-sub table[summary=\"Ethernet IPv4 Statistics Table\"]").Each(func(i int, s *goquery.Selection) {
-				key := s.Find("th").Text()
-				log.Printf("found ipv4 key %s\n", key)
-				counter, err := strconv.Atoi(s.Find("tr").Text())
+			// Grab the ipv4 and ipv6 stats section
+			ipv4StatsCurrent := getIntMetricsMapFromDocumentSection(doc, "#content-sub table[summary=\"Ethernet IPv4 Statistics Table\"]")
+			ipv6StatsCurrent := getIntMetricsMapFromDocumentSection(doc, "#content-sub table[summary=\"IPv6 Statistics Table\"]")
 
-				if err != nil {
-					log.Printf("err for %s value: %s", key, err)
-				} else {
-					ipv4Stats[key] = counter
+			for k, v := range ipv4StatsCurrent {
+				if stat, ok := ipv4Stats[k]; ok {
+					_ = samplesToIncrement(stat, v)
 				}
-			})
-
-			// fmt.Println("ipv6")
-			// Grab the ipv6 stats section
-			doc.Find("#content-sub table[summary=\"IPv6 Statistics Table\"]").Each(func(i int, s *goquery.Selection) {
-				key := s.Find("th").Text()
-				log.Printf("found ipv6 key %s\n", key)
-				counter, err := strconv.Atoi(s.Find("tr").Text())
-
-				if err != nil {
-					log.Printf("err for %s value: %s", key, err)
-				} else {
-					ipv6Stats[key] = counter
-				}
-			})
-
-			for k, v := range ipv4Stats {
-				if stat, ok := ipv4StatsCurrent[k]; ok {
-
-					if stat > v {
-						//  if the stat counter has wrapped around
-						attBroadbandIpv4RxPackets.Add(float64((math.MaxInt64 - v) + stat))
-					} else {
-						// otherwise, difference between last and current values
-						attBroadbandIpv4RxPackets.Add(float64(v - stat))
-					}
+			}
+			for k, v := range ipv6StatsCurrent {
+				if stat, ok := ipv6Stats[k]; ok {
+					_ = samplesToIncrement(stat, v)
 				}
 			}
 
@@ -134,10 +126,6 @@ const (
 
 func main() {
 	flag.Parse()
-
-	//prometheus.MustRegister(probeSuccessGauge)
-	//prometheus.MustRegister(probeStatusCodeGauge)
-	//prometheus.MustRegister(attBroadbandIpv4RxPackets)
 
 	recordMetrics()
 
