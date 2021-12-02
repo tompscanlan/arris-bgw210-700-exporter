@@ -22,32 +22,11 @@ func recordMetrics() {
 
 		for {
 			ipv4StatsCurrent := make(map[string]int)
-			ipv6StatsCurrent := make(map[string]int)
+			// ipv6StatsCurrent := make(map[string]int)
 
-			response, err := http.Get("http://192.168.1.254/cgi-bin/broadbandstatistics.ha")
+			doc, err := grabDocument("http://192.168.1.254/cgi-bin/broadbandstatistics.ha")
 			if err != nil {
-				probeSuccessGauge.Set(0)
-				log.Printf("request failed: %s\n", err)
-				if response != nil {
-					response.Body.Close()
-				}
-				continue
-			} else {
-				probeSuccessGauge.Set(1)
-			}
-
-			probeStatusCodeGauge.Set(float64(response.StatusCode))
-			if response.StatusCode != 200 {
-				log.Printf("status code error: %d %s\n", response.StatusCode, response.Status)
-				response.Body.Close()
-				continue
-			}
-
-			// Load the HTML document
-			doc, err := goquery.NewDocumentFromReader(response.Body)
-			if err != nil {
-				log.Printf("failed to query doc: %s\n", err)
-				response.Body.Close()
+				log.Printf("failed to grab doc: %s\n", err)
 				continue
 			}
 
