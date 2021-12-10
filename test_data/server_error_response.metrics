@@ -1,0 +1,6 @@
+# HELP arris_exporter_total_scrapes Current total scrapes.
+# TYPE arris_exporter_total_scrapes counter
+arris_exporter_total_scrapes 1
+# HELP arris_up Was the last scrape of the router successful.
+# TYPE arris_up gauge
+arris_up 0
